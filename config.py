@@ -13,7 +13,7 @@ from pathlib import Path
 class Config(BaseSettings):
     # Data sources
     transcript_source: str = "seeking_alpha"
-    price_source: str = "alpaca"
+    price_source: str = "yfinance"
     transcript_dir: str = "./transcript_data"
 
     # Model settings
@@ -63,8 +63,8 @@ class Config(BaseSettings):
         return cls(**data)
 
     def setup_directories(self):
-        Path(self.output_dir).mkdir(exist_ok=True)
-        Path(self.cache_dir).mkdir(exist_ok=True)
+        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
 
     def load_param_grid(self) -> Dict[str, Any]:
         """Loads the hyperparameter grid from the JSON path"""

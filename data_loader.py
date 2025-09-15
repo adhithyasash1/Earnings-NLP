@@ -1,19 +1,20 @@
 # ============================================
-# data_loader.py - Enhanced Data Collection
+# data_loader.py - Updated for yfinance
 # ============================================
-"""Data loading with caching and batch fetching"""
+"""Data loading with caching and yfinance"""
 import os
 import glob
 import pandas as pd
 from datetime import datetime, timedelta
 import re
 from pathlib import Path
+import yfinance as yf  # <-- ADD THIS IMPORT
 
 # --- ADD THESE IMPORTS ---
 from typing import List, Dict, Set, Tuple
 from config import Config
 from utils import setup_logging, parse_transcript_sections, cache_result
-from models import Transcript  # <-- This is the main fix
+from models import Transcript
 
 
 # -------------------------
@@ -22,21 +23,12 @@ class DataLoader:
     def __init__(self, config: Config):
         self.config = config
         self.logger = setup_logging(config.log_level)
-        self._init_apis()
+        # We don't need _init_apis() for yfinance
+        # self._init_apis()
 
     def _init_apis(self):
-        """Initialize API clients"""
-        if self.config.price_source == "alpaca":
-            from alpaca.data import StockHistoricalDataClient
-            from alpaca.data.requests import StockBarsRequest
-            from alpaca.data.timeframe import TimeFrame
-
-            self.stock_client = StockHistoricalDataClient(
-                self.config.alpaca_key,
-                self.config.alpaca_secret
-            )
-            self.TimeFrame = TimeFrame
-            self.StockBarsRequest = StockBarsRequest
+        """Initialize API clients (No longer needed for yfinance)"""
+        pass
 
     def load_transcripts(self) -> List[Transcript]:
         """Load and validate earnings call transcripts"""
@@ -73,7 +65,7 @@ class DataLoader:
 
     def fetch_prices_batch(self, tickers: Set[str], start: datetime,
                            end: datetime) -> pd.DataFrame:
-        """Fetch prices for multiple tickers in batch"""
+        """Fetch prices for multiple tickers in batch using yfinance"""
         cache_path = Path(self.config.cache_dir) / f"prices_{start.date()}_{end.date()}.parquet"
 
         if cache_path.exists():
@@ -82,34 +74,60 @@ class DataLoader:
 
         all_data = []
 
-        if self.config.price_source == "alpaca":
-            ticker_list = list(tickers)
-            for i in range(0, len(ticker_list), 10):
-                ticker_batch = ticker_list[i:i + 10]
-                request = self.StockBarsRequest(
-                    symbol_or_symbols=ticker_batch,
-                    timeframe=self.TimeFrame.Day,
-                    start=start,
-                    end=end
-                )
-                bars = self.stock_client.get_stock_bars(request)
-                df = bars.df.reset_index()
-                df.columns = ['timestamp', 'ticker', 'open', 'high', 'low', 'close', 'volume', 'trade_count', 'vwap']
-                all_data.append(df[['timestamp', 'ticker', 'close', 'volume']])
+        if self.config.price_source == "yfinance":
+            ticker_list_str = " ".join(list(tickers))
+            try:
+                # yfinance 'end' is exclusive, add one day to be inclusive
+                end_date_str = (end + timedelta(days=1)).strftime('%Y-%m-%d')
+                start_date_str = start.strftime('%Y-%m-%d')
 
-        if not all_data:
-            self.logger.warning("No price data returned from API.")
+                data = yf.download(
+                    tickers=ticker_list_str,
+                    start=start_date_str,
+                    end=end_date_str,
+                    progress=False
+                )
+
+                if data.empty:
+                    self.logger.warning(f"No price data returned from yfinance for {ticker_list_str}")
+                    return pd.DataFrame(columns=['timestamp', 'ticker', 'close', 'volume'])
+
+                # Format the data into the long format expected by the application
+                # Stack the multi-level columns (e.g., 'Close', 'Volume') and tickers
+                df_long = data.stack(level=1).reset_index()
+
+                # Rename columns to match the required format
+                df_long = df_long.rename(columns={
+                    'Date': 'timestamp',
+                    'level_1': 'ticker',
+                    'Close': 'close',
+                    'Volume': 'volume'
+                })
+
+                # Ensure timestamp is datetime
+                df_long['timestamp'] = pd.to_datetime(df_long['timestamp'])
+
+                # Select only the columns we need
+                result = df_long[['timestamp', 'ticker', 'close', 'volume']]
+
+                # Cache the result
+                Path(self.config.cache_dir).mkdir(exist_ok=True)
+                result.to_parquet(cache_path)
+                return result
+
+            except Exception as e:
+                self.logger.error(f"yfinance download failed: {e}")
+                return pd.DataFrame(columns=['timestamp', 'ticker', 'close', 'volume'])
+
+        elif self.config.price_source == "alpaca":
+            self.logger.error("Alpaca client not initialized. Set price_source to yfinance.")
+            # ... (original alpaca code would be here, but is now removed)
             return pd.DataFrame(columns=['timestamp', 'ticker', 'close', 'volume'])
 
-        result = pd.concat(all_data, ignore_index=True)
-        result['timestamp'] = pd.to_datetime(result['timestamp'])
-
-        # Cache the result
-        Path(self.config.cache_dir).mkdir(exist_ok=True)
-        result.to_parquet(cache_path)
-
-        return result
+        else:
+            raise ValueError(f"Unknown price_source: {self.config.price_source}")
 
     def fetch_benchmark_prices(self, start: datetime, end: datetime) -> pd.DataFrame:
         """Fetch benchmark (SPY) prices"""
+        # This function works as-is, it just calls the new yfinance batch fetcher
         return self.fetch_prices_batch({self.config.benchmark_ticker}, start, end)

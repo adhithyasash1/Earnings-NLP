@@ -20,9 +20,13 @@ class FeatureExtractor:
     def __init__(self, config: Config):
         self.config = config
         self.logger = setup_logging(config.log_level)
-        self.embedding_model = SentenceTransformer(config.embedding_model)
+        # Keep token=False for the embedding model (from previous fix)
+        self.embedding_model = SentenceTransformer(config.embedding_model, token=False)
+
+        # Change the model string for the sentiment model
         self.sentiment_model = pipeline("sentiment-analysis",
-                                        model="ProsusAI/finbert")
+                                        model="mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis",
+                                        token=False)
 
     @cache_result("./cache", "features")
     def extract_features(self, transcripts: List[Transcript]) -> pd.DataFrame:

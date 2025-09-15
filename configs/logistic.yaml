@@ -1,7 +1,7 @@
 # Configuration for Logistic Regression model
 transcript_source: seeking_alpha
-price_source: alpaca
-transcript_dir: "./transcript_data
+price_source: yfinance
+transcript_dir: "./transcript_data"
 
 # Model settings
 embedding_model: thenlper/gte-small
