@@ -1,0 +1,23 @@
+# Configuration for XGBoost model
+transcript_source: seeking_alpha
+price_source: alpaca
+transcript_dir: "./transcript_data
+
+# Model settings
+embedding_model: thenlper/gte-small
+alpha_model: xgboost
+
+# Trading parameters
+holding_periods: [5, 10, 20]
+prediction_target: direction
+use_market_neutral: true
+benchmark_ticker: SPY
+
+# Training settings
+train_test_split_date: "2023-01-01"
+random_seed: 42
+
+# Output settings
+output_dir: ./outputs/xgboost
+cache_dir: ./cache
+log_level: INFO

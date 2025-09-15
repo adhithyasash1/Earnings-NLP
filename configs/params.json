@@ -1,0 +1,18 @@
+{
+  "logistic": {
+    "model__C": [0.1, 1.0, 10.0]
+  },
+  "ridge": {
+    "model__alpha": [0.1, 1.0, 10.0]
+  },
+  "xgboost_classifier": {
+    "model__n_estimators": [50, 100],
+    "model__max_depth": [3, 5],
+    "model__learning_rate": [0.01, 0.1]
+  },
+  "xgboost_regressor": {
+    "model__n_estimators": [50, 100],
+    "model__max_depth": [3, 5],
+    "model__learning_rate": [0.01, 0.1]
+  }
+}
