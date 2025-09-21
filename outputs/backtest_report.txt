@@ -2,14 +2,14 @@
 BACKTEST RESULTS
 ==================================================
 
-Accuracy: 0.314
-Precision: 0.381
-Recall: 0.421
-F1: 0.400
+Accuracy: 0.400
+Precision: 0.235
+Recall: 0.317
+F1: 0.261
 
-IC: -0.122 (p=0.4866)
+IC: -0.342 (p=0.0644)
 
-Total Return: -32.58%
-Event Sharpe: -0.28
-Win Rate: 31.43%
-Max Drawdown: -39.48%
+Total Return: -4.92%
+Event Sharpe: -0.11
+Win Rate: 6.67%
+Max Drawdown: -8.19%

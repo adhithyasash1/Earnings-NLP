@@ -1,7 +1,7 @@
 transcript_source: seeking_alpha
 price_source: yfinance
 transcript_dir: "./transcript_data"
-embedding_model: all-MiniLM-L6-v2
+embedding_model: FinLang/finance-embeddings-investopedia
 alpha_model: logistic
 use_pca: true
 pca_n_components: 0.95

@@ -11,3 +11,6 @@ joblib
 scipy
 datasets
 einops
+textstat
+nltk
+requests

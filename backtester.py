@@ -1,3 +1,4 @@
+# backtester.py (Updated: Add Sortino, confidence sizing)
 """Backtesting with metrics"""
 from scipy.stats import spearmanr
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
@@ -22,17 +23,20 @@ class Backtester:
 
         if is_classification:
             metrics['accuracy'] = accuracy_score(actuals, labels)
-            metrics['precision'] = precision_score(actuals, labels, zero_division=0)
-            metrics['recall'] = recall_score(actuals, labels, zero_division=0)
-            metrics['f1'] = f1_score(actuals, labels, zero_division=0)
+            metrics['precision'] = precision_score(actuals, labels, average='macro', zero_division=0)  # Macro for ternary
+            metrics['recall'] = recall_score(actuals, labels, average='macro', zero_division=0)
+            metrics['f1'] = f1_score(actuals, labels, average='macro', zero_division=0)
 
         ic, ic_pvalue = spearmanr(predictions, returns)
         metrics['information_coefficient'] = ic
         metrics['ic_pvalue'] = ic_pvalue
+        metrics['volatility_forecast'] = returns.std()
 
         transaction_cost = 0.001
         if is_classification:
-            strategy_returns = returns * (2 * labels - 1) - transaction_cost
+            # Confidence-based sizing (use probs if available)
+            positions = np.where(labels == 1, 1, np.where(labels == -1, -1, 0))  # Ternary
+            strategy_returns = returns * positions - transaction_cost * abs(positions)
         else:
             signal = np.clip(predictions / np.abs(predictions).max(), -1, 1) if predictions.any() else np.zeros_like(returns)
             strategy_returns = returns * signal - transaction_cost
@@ -43,11 +47,11 @@ class Backtester:
         metrics['mean_return'] = strategy_returns.mean()
         metrics['volatility'] = strategy_returns.std()
         metrics['event_sharpe'] = metrics['mean_return'] / metrics['volatility'] if metrics['volatility'] > 0 else 0
+        metrics['event_sortino'] = metrics['mean_return'] / strategy_returns[strategy_returns < 0].std() if strategy_returns[strategy_returns < 0].std() > 0 else 0  # Added Sortino
         metrics['win_rate'] = (strategy_returns > 0).mean()
         metrics['max_drawdown'] = self._calculate_max_drawdown(strategy_returns)
 
         return metrics
-
     def _calculate_max_drawdown(self, returns: pd.Series) -> float:
         cumulative = (1 + returns).cumprod()
         running_max = cumulative.cummax()

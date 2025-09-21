@@ -1,3 +1,4 @@
+# alpha_model.py (Updated: Vectorized labels, ternary option, add features to preprocessor)
 """Alpha signal generation"""
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -54,7 +55,17 @@ class AlphaModel:
 
     def _build_preprocessor(self, X: pd.DataFrame) -> ColumnTransformer:
         emb_cols = [c for c in X.columns if c.startswith('emb_')]
-        linguistic_cols = [c for c in X.columns if not c.startswith('emb_')]
+        linguistic_cols = [c for c in X.columns if
+                           not c.startswith('emb_') and not c.startswith('topic_') and c in ['sentiment_finbert',
+                                                                                             'sentiment_vader',
+                                                                                             'word_count',
+                                                                                             'readability_gunning',
+                                                                                             'readability_flesch',
+                                                                                             'readability_custom',
+                                                                                             'lm_positive',
+                                                                                             'lm_negative',
+                                                                                             'lm_uncertainty']]
+        topic_cols = [c for c in X.columns if c.startswith('topic_')]
 
         transformers = []
 
@@ -68,6 +79,12 @@ class AlphaModel:
             ])
             transformers.append(('linguistic', linguistic_pipeline, linguistic_cols))
 
+        if topic_cols:
+            topic_pipeline = Pipeline([
+                ('scaler', StandardScaler()),
+            ])
+            transformers.append(('topics', topic_pipeline, topic_cols))  # No selector, keep all topics
+
         if emb_cols and self.config.use_pca:
             emb_pipeline = Pipeline([
                 ('scaler', StandardScaler()),
@@ -80,14 +97,13 @@ class AlphaModel:
     def _create_labels(self, merged: pd.DataFrame, return_col: str) -> pd.DataFrame:
         returns = merged[return_col].copy()
         if self.config.labeling_strategy == "quantile":
-            low_threshold = returns.quantile(0.3)
-            high_threshold = returns.quantile(0.7)
-            merged['label'] = np.where(returns >= high_threshold, 1,
-                                       np.where(returns <= low_threshold, 0, np.nan))
-            merged = merged.dropna(subset=['label'])
+            low = returns.quantile(0.3)
+            high = returns.quantile(0.7)
+            merged['label'] = np.where(returns >= high, 1, np.where(returns <= low, -1, 0))  # Changed to ternary: 1 buy, -1 sell, 0 hold
+            # No dropna, keep holds for ternary classification
         else:  # median_split
             median = returns.median()
-            merged['label'] = (returns >= median).astype(int)
+            merged['label'] = np.where(returns > median + 0.01, 1, np.where(returns < median - 0.01, -1, 0))  # Add thresholds for hold
         return merged
 
     def prepare_labels(self, features_df: pd.DataFrame, prices_df: pd.DataFrame,
@@ -101,85 +117,50 @@ class AlphaModel:
         features_df['entry_date'] = features_df['date'] + pd.Timedelta(days=2)
         features_df['exit_date'] = features_df['entry_date'] + pd.Timedelta(days=holding_period)
 
-        results = []
-        for _, row in features_df.iterrows():
-            ticker = row['ticker']
-            entry_date = row['entry_date']
-            exit_date = row['exit_date']
+        # Vectorized: Merge and find entry/exit prices
+        merged = pd.merge(features_df, prices_df, on='ticker', how='left')
+        merged = merged[merged['timestamp'] >= merged['entry_date']]
+        entry_prices = merged.groupby(['ticker', 'entry_date'])['close'].first().reset_index(name='entry_price')
 
-            ticker_prices = prices_df[prices_df['ticker'] == ticker].sort_values('timestamp')
-            entry_prices = ticker_prices[ticker_prices['timestamp'] >= entry_date]
-            if entry_prices.empty:
-                continue
-            entry_price = entry_prices.iloc[0]['close']
+        merged = pd.merge(features_df, prices_df, on='ticker', how='left')
+        merged = merged[merged['timestamp'] <= merged['exit_date']]
+        exit_prices = merged.groupby(['ticker', 'exit_date'])['close'].last().reset_index(name='exit_price')
 
-            exit_prices = ticker_prices[ticker_prices['timestamp'] <= exit_date]
-            if exit_prices.empty:
-                continue
-            exit_price = exit_prices.iloc[-1]['close']
+        merged = features_df.merge(entry_prices, on=['ticker', 'entry_date'], how='left') \
+            .merge(exit_prices, on=['ticker', 'exit_date'], how='left')
+        merged = merged.dropna(subset=['entry_price', 'exit_price'])
+        merged = merged[(merged['entry_price'] > 0) & (merged['exit_price'] > 0)]
+        merged['future_return'] = (merged['exit_price'] - merged['entry_price']) / merged['entry_price']
+        merged = merged[abs(merged['future_return']) <= 0.5]
 
-            # Fix: Convert to scalar values and add proper validation
-            try:
-                entry_price_val = float(entry_price)
-                exit_price_val = float(exit_price)
-            except (ValueError, TypeError):
-                continue
+        initial_count = len(features_df)
+        after_merge = len(merged)
+        self.logger.info(
+            f"Labeled samples: {after_merge}/{initial_count} (dropped {initial_count - after_merge} due to missing/invalid prices)")
 
-            # Skip if prices are invalid or the return is too extreme (likely data error)
-            if (entry_price_val <= 0 or exit_price_val <= 0 or
-                abs((exit_price_val - entry_price_val) / entry_price_val) > 0.5):
-                continue
-
-            future_return = (exit_price_val - entry_price_val) / entry_price_val
-            result_row = row.to_dict()
-            result_row['future_return'] = future_return
-            results.append(result_row)
-
-        merged = pd.DataFrame(results)
-
-        if merged.empty:
-            self.logger.warning("No valid price data found for any features")
-            return pd.DataFrame()
+        # Optional: Next-day returns (config.next_day = True)
+        if hasattr(self.config, 'next_day') and self.config.next_day:
+            merged['exit_date'] = merged['entry_date'] + pd.Timedelta(days=1)
 
         if self.config.use_market_neutral and benchmark_df is not None:
-            benchmark_df = benchmark_df.sort_values('timestamp')
-            valid_indices = []
+            benchmark_df = benchmark_df.copy()
+            benchmark_df['timestamp'] = pd.to_datetime(benchmark_df['timestamp'])
+            bench_merged_entry = pd.merge(features_df[['entry_date']], benchmark_df, left_on='entry_date',
+                                          right_on='timestamp', how='left')
+            bench_entry = bench_merged_entry.groupby('entry_date')['close'].first().reset_index(name='bench_entry')
 
-            for idx, row in merged.iterrows():
-                entry_date = row['entry_date']
-                exit_date = row['exit_date']
+            bench_merged_exit = pd.merge(features_df[['exit_date']], benchmark_df, left_on='exit_date',
+                                         right_on='timestamp', how='left')
+            bench_exit = bench_merged_exit.groupby('exit_date')['close'].last().reset_index(name='bench_exit')
 
-                bench_entry_data = benchmark_df[benchmark_df['timestamp'] >= entry_date]
-                bench_exit_data = benchmark_df[benchmark_df['timestamp'] <= exit_date]
-
-                if bench_entry_data.empty or bench_exit_data.empty:
-                    continue
-
-                bench_entry = bench_entry_data.iloc[0]['close']
-                bench_exit = bench_exit_data.iloc[-1]['close']
-
-                try:
-                    bench_entry_val = float(bench_entry)
-                    bench_exit_val = float(bench_exit)
-                except (ValueError, TypeError):
-                    continue
-
-                if bench_entry_val <= 0 or bench_exit_val <= 0:
-                    continue
-
-                benchmark_return = (bench_exit_val - bench_entry_val) / bench_entry_val
-                merged.at[idx, 'relative_return'] = row['future_return'] - benchmark_return
-                valid_indices.append(idx)
-
-            # Keep only rows with valid benchmark data
-            merged = merged.loc[valid_indices]
+            merged = merged.merge(bench_entry, on='entry_date').merge(bench_exit, on='exit_date')
+            merged = merged.dropna(subset=['bench_entry', 'bench_exit'])
+            merged = merged[(merged['bench_entry'] > 0) & (merged['bench_exit'] > 0)]
+            merged['benchmark_return'] = (merged['bench_exit'] - merged['bench_entry']) / merged['bench_entry']
+            merged['relative_return'] = merged['future_return'] - merged['benchmark_return']
             return_col = 'relative_return'
         else:
             return_col = 'future_return'
-
-        if merged.empty:
-            self.logger.warning("No valid data after benchmark adjustment")
-            return pd.DataFrame()
 
         if self.config.prediction_target == "direction":
             merged = self._create_labels(merged, return_col)
@@ -194,13 +175,12 @@ class AlphaModel:
         self.model_pipeline = Pipeline([('preprocessor', preprocessor), ('model', model)])
 
         tscv = TimeSeriesSplit(n_splits=5)
-        if self.config.use_hyperparam_tuning:
-            param_grid = self.config.load_param_grid()
-            if param_grid:
-                tuner = GridSearchCV(self.model_pipeline, param_grid, cv=tscv, scoring=self.config.tuner_scoring_metric)
-                tuner.fit(X, y)
-                self.model_pipeline = tuner.best_estimator_
-                return tuner.best_score_
+        param_grid = self.config.load_param_grid()
+        if param_grid or self.config.use_hyperparam_tuning:  # Enabled if grid or flag
+            tuner = GridSearchCV(self.model_pipeline, param_grid or {}, cv=tscv, scoring=self.config.tuner_scoring_metric)
+            tuner.fit(X, y)
+            self.model_pipeline = tuner.best_estimator_
+            return tuner.best_score_
 
         self.model_pipeline.fit(X, y)
         return self._cross_validate(X, y, tscv)

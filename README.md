@@ -1,3 +1,4 @@
+# README.md (Updated)
 # Earnings-NLP
 
 A minimal pipeline for analyzing earnings transcripts using NLP to generate trading signals.
@@ -8,7 +9,13 @@ A minimal pipeline for analyzing earnings transcripts using NLP to generate trad
 
 ## Key Components
 - Data loading from transcripts and yfinance.
-- Feature extraction: Embeddings and sentiment.
-- Label preparation with leakage prevention.
-- Model training with time-series CV.
-- Backtesting with metrics.
+- Feature extraction: Finance-tuned embeddings, full LM sentiment, section analysis.
+- Label preparation with vectorization and ternary labels.
+- Model training with time-series CV and tuning.
+- Backtesting with enhanced metrics.
+
+## Improvements
+- Finance-specific embeddings (FinLang/finance-embeddings-investopedia).
+- Full Loughran-McDonald lexicon download/integration.
+- SSL fix for NLTK on macOS.
+- Ternary labels and weighted sections.
