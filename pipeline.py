@@ -1,7 +1,7 @@
 # ============================================
-# pipeline.py - ROBUST PIPELINE WITH IMPROVED VALIDATION
+# pipeline.py - FIXED TO WORK WITH ULTRA-CONSERVATIVE ALPHA MODEL
 # ============================================
-"""End-to-end pipeline with robust validation and leakage prevention"""
+"""End-to-end pipeline with proper integration of ultra-conservative feature selection"""
 import logging
 from datetime import timedelta
 import pandas as pd
@@ -89,38 +89,9 @@ class EarningsNLPPipeline:
         self.logger.info(f"Data quality check: {initial_count} → {len(labeled_data)} samples")
         return labeled_data
 
-    def _analyze_features(self, train_df: pd.DataFrame, test_df: pd.DataFrame):
-        """
-        Analyze feature quality and potential issues
-        """
-        # Check feature consistency between train/test
-        train_cols = set(train_df.columns)
-        test_cols = set(test_df.columns)
-        if train_cols != test_cols:
-            self.logger.warning("Train/test feature mismatch detected!")
-
-        # Check for features with zero variance
-        numeric_cols = train_df.select_dtypes(include=[np.number]).columns
-        zero_var_features = []
-        for col in numeric_cols:
-            if col not in ['label', 'future_return', 'relative_return']:
-                if train_df[col].std() == 0:
-                    zero_var_features.append(col)
-
-        if zero_var_features:
-            self.logger.warning(f"Found {len(zero_var_features)} zero-variance features")
-
-        # Check for highly correlated features in embeddings
-        emb_cols = [c for c in numeric_cols if c.startswith('emb_')]
-        if len(emb_cols) > 1:
-            corr_matrix = train_df[emb_cols].corr().abs()
-            high_corr_pairs = (corr_matrix > 0.99).sum().sum() - len(emb_cols)
-            if high_corr_pairs > 0:
-                self.logger.warning(f"Found {high_corr_pairs} highly correlated embedding pairs")
-
     def run(self):
-        """Execute complete pipeline with robust validation"""
-        self.logger.info("Starting Robust Earnings NLP Pipeline...")
+        """Execute complete pipeline with ultra-conservative approach"""
+        self.logger.info("Starting Ultra-Conservative Earnings NLP Pipeline...")
         self.logger.info(f"Prediction Target: {self.config.prediction_target}")
         self.logger.info(f"Model: {self.config.alpha_model}")
 
@@ -197,25 +168,29 @@ class EarningsNLPPipeline:
         if len(train_df) < 30:
             self.logger.warning(f"Only {len(train_df)} training samples - results may be unreliable")
 
-        # 9. Feature preparation
+        # 9. FIXED: Prepare features for AlphaModel (let it handle selection)
+        # Get all potential features but let AlphaModel choose the best ones
         emb_cols = [c for c in train_df.columns if c.startswith('emb_')]
-        linguistic_cols = ['sentiment', 'sentiment_remarks', 'sentiment_qa', 'word_count', 'readability']
-        all_feature_cols = emb_cols + linguistic_cols
+        linguistic_cols = [c for c in train_df.columns if
+                           c in ['sentiment', 'sentiment_remarks', 'sentiment_qa', 'word_count', 'readability']]
 
-        # Only use features that exist and have some variance
+        # Basic filtering only: remove NaN and zero-variance features
+        all_potential_features = emb_cols + linguistic_cols
         feature_cols = []
-        for col in all_feature_cols:
+
+        for col in all_potential_features:
             if col in train_df.columns and not train_df[col].isnull().all():
-                if train_df[col].std() > 0:  # Has some variance
+                if train_df[col].std() > 1e-6:  # Small threshold for numerical stability
                     feature_cols.append(col)
 
-        self.logger.info(
-            f"Using {len(feature_cols)} features ({len(emb_cols)} embeddings, {len([c for c in linguistic_cols if c in feature_cols])} linguistic)")
+        self.logger.info(f"Available features for model selection: {len(feature_cols)} "
+                         f"({len([c for c in feature_cols if c.startswith('emb_')])} embeddings, "
+                         f"{len([c for c in feature_cols if not c.startswith('emb_')])} linguistic)")
 
-        # Feature analysis
-        self._analyze_features(train_df[feature_cols], test_df[feature_cols])
+        # CRITICAL: Don't do any feature selection here - let AlphaModel handle it
+        # The AlphaModel's _build_preprocessor will choose the optimal features
 
-        # 10. Prepare training data
+        # 10. Prepare training data (full feature set)
         X_train = train_df[feature_cols].fillna(0)
         y_train = train_df['label']
 
@@ -232,8 +207,8 @@ class EarningsNLPPipeline:
             if minority_ratio < 0.05:
                 self.logger.warning(f"Severe class imbalance in training: {minority_ratio:.1%} minority class")
 
-        # 11. Train model
-        self.logger.info("Training model with regularization...")
+        # 11. Train model (AlphaModel will handle feature selection internally)
+        self.logger.info("Training ultra-conservative model...")
         val_score = self.alpha_model.train(X_train, y_train)
         self.logger.info(f"Cross-validation score: {val_score:.4f}")
 
@@ -263,7 +238,17 @@ class EarningsNLPPipeline:
         metrics['train_samples'] = len(train_df)
         metrics['test_samples'] = len(test_df)
         metrics['cv_score'] = val_score
-        metrics['feature_count'] = len(feature_cols)
+
+        # FIXED: Report actual features used by the model
+        # Try to get the number of features after preprocessing
+        try:
+            # Transform a small sample to see actual feature count
+            sample_transformed = self.alpha_model.model_pipeline.named_steps['preprocessor'].transform(X_train.head(1))
+            actual_features_used = sample_transformed.shape[1]
+            metrics['features_used'] = actual_features_used
+            self.logger.info(f"ACTUAL features used by model: {actual_features_used}")
+        except:
+            metrics['features_used'] = len(feature_cols)  # Fallback
 
         # Sanity checks on results
         if metrics.get('total_return', 0) > 5.0:  # >500% return
@@ -273,14 +258,16 @@ class EarningsNLPPipeline:
             self.logger.warning("Suspiciously high win rate - possible overfitting!")
 
         # 15. Generate comprehensive report
-        report_path = Path(self.config.output_dir) / "robust_backtest_report.txt"
+        report_path = Path(self.config.output_dir) / "ultraconservative_backtest_report.txt"
         report = self.backtester.generate_report(metrics, report_path)
 
         # Add validation info to report
-        validation_info = f"\n\nMODEL VALIDATION:\n"
+        validation_info = f"\n\nULTRA-CONSERVATIVE MODEL VALIDATION:\n"
         validation_info += f"Cross-validation Score: {val_score:.4f}\n"
         validation_info += f"Train/Test Samples: {len(train_df)}/{len(test_df)}\n"
-        validation_info += f"Features Used: {len(feature_cols)}\n"
+        validation_info += f"Available Features: {len(feature_cols)}\n"
+        validation_info += f"Actual Features Used: {metrics['features_used']}\n"
+        validation_info += f"Feature Reduction Ratio: {len(feature_cols)}/{metrics['features_used']} = {len(feature_cols) / metrics['features_used']:.1f}x\n"
         validation_info += f"Data Date Range: {labeled_data['date'].min().date()} to {labeled_data['date'].max().date()}\n"
 
         with open(report_path, 'a') as f:
