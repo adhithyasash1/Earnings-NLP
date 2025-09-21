@@ -1,30 +1,30 @@
-# Robust Configuration for XGBoost model with regularization
+# Ultra-Conservative Configuration to Prevent Overfitting
 transcript_source: seeking_alpha
 price_source: yfinance
 transcript_dir: "./transcript_data"
 
-# Model settings - tuned for robustness
-embedding_model: thenlper/gte-small
-alpha_model: xgboost
+# Model settings - ultra-conservative
+embedding_model: mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis
+alpha_model: logistic  # Most stable for small datasets
 use_pca: true
-pca_n_components: 10 # Reduced from 50 to prevent overfitting
+pca_n_components: 3    # Very few components
 
 # Trading parameters
-holding_periods: [5, 10, 20]
+holding_periods: [5]   # Test with single holding period first
 prediction_target: direction
-use_market_neutral: true
+use_market_neutral: false  # Start with absolute returns
 benchmark_ticker: SPY
 
 # Training settings
-train_test_split_date: "2019-01-01"  # Will be auto-adjusted if needed
+train_test_split_date: "2019-01-01"
 random_seed: 42
 
-# Hyperparameter tuning - enabled with robust parameters
-use_hyperparam_tuning: true
+# Hyperparameter tuning - disabled to prevent overfitting
+use_hyperparam_tuning: false
 tuner_param_grid_path: "./configs/params.json"
 tuner_scoring_metric: accuracy
 
 # Output settings
-output_dir: ./outputs/robust_xgboost
+output_dir: ./outputs/ultraconservative
 cache_dir: ./cache
 log_level: INFO
