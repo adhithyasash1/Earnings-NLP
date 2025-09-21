@@ -1,8 +1,9 @@
-# feature_extractor.py (Updated: Replace gensim LDA with sklearn NMF)
+# feature_extractor.py (Updated: Batch NMF)
 """Feature extraction"""
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 from typing import List
 import textstat
@@ -14,7 +15,7 @@ import os
 import requests
 from io import StringIO
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.decomposition import NMF  # Use sklearn for topics
+from sklearn.decomposition import NMF
 
 from config import Config
 from utils import setup_logging, calculate_readability
@@ -66,6 +67,10 @@ class FeatureExtractor:
 
         self.lm_dict = self._load_lm_dictionary()
 
+        # For batch NMF
+        self.vectorizer = TfidfVectorizer(max_df=0.95, min_df=2, stop_words='english')  # min_df=2 to avoid singletons
+        self.nmf = NMF(n_components=5, random_state=42)
+
     def _load_lm_dictionary(self) -> pd.DataFrame:
         lm_path = 'lm_master_dictionary.csv'
         if not os.path.exists(lm_path):
@@ -88,7 +93,9 @@ class FeatureExtractor:
         transcripts = sorted(transcripts, key=lambda t: (t.ticker, t.date))
         features = []
         prev_by_ticker = {}
+        all_texts = []  # For batch NMF
 
+        # First pass: Collect texts and compute non-topic features
         for t in tqdm(transcripts):
             feature_dict = {'ticker': t.ticker, 'date': t.date, 'filename': t.filename}
 
@@ -125,7 +132,7 @@ class FeatureExtractor:
                 lm_uncertainty = self.lm_dict[self.lm_dict['UNCERTAINTY'] > 0]['WORD'].str.lower().to_list()
             else:
                 # Fallback
-                pass  # As before
+                pass
 
             feature_dict['lm_positive'] = sum(1 for w in words if w in lm_positive) / total_words
             feature_dict['lm_negative'] = sum(1 for w in words if w in lm_negative) / total_words
@@ -137,27 +144,43 @@ class FeatureExtractor:
             feature_dict['readability_flesch'] = textstat.flesch_reading_ease(full_text)
             feature_dict['readability_custom'] = calculate_readability(full_text)
 
-            # Topics with sklearn NMF (replacement for LDA)
+            # Collect for batch NMF
             if len(words) > 0:
-                vectorizer = TfidfVectorizer(max_df=0.95, min_df=1, stop_words='english')
-                tfidf = vectorizer.fit_transform([' '.join(words)])  # Single doc
-                nmf = NMF(n_components=5, random_state=42)
-                W = nmf.fit_transform(tfidf)
-                for i, prob in enumerate(W[0]):
-                    feature_dict[f'topic_{i}'] = prob
+                all_texts.append(' '.join(words))
             else:
+                all_texts.append('')  # Placeholder
+
+            # Temp append without topics
+            features.append(feature_dict)
+            prev_by_ticker[t.ticker] = feature_dict.copy()
+
+        # Batch NMF if texts
+        if all_texts and any(t != '' for t in all_texts):
+            try:
+                tfidf = self.vectorizer.fit_transform(all_texts)
+                W = self.nmf.fit_transform(tfidf)
+                for idx, feature_dict in enumerate(features):
+                    for i, prob in enumerate(W[idx]):
+                        feature_dict[f'topic_{i}'] = prob
+            except Exception as e:
+                self.logger.warning(f"NMF failed: {e}. Setting topics to 0.")
+                for feature_dict in features:
+                    for i in range(5):
+                        feature_dict[f'topic_{i}'] = 0.0
+        else:
+            for feature_dict in features:
                 for i in range(5):
                     feature_dict[f'topic_{i}'] = 0.0
 
-            # Deltas (unchanged)
+        # Second pass for deltas (now with topics)
+        for t, feature_dict in zip(transcripts, features):
             prev = prev_by_ticker.get(t.ticker)
             if prev:
                 for key in ['sentiment_finbert', 'sentiment_vader', 'lm_positive', 'lm_negative', 'lm_uncertainty',
-                            'word_count']:
-                    feature_dict[f'{key}_delta'] = feature_dict[key] - prev[key]
+                            'word_count'] + [f'topic_{i}' for i in range(5)]:
+                    if key in feature_dict:  # Ensure key exists
+                        feature_dict[f'{key}_delta'] = feature_dict[key] - prev[key]
             prev_by_ticker[t.ticker] = feature_dict.copy()
-
-            features.append(feature_dict)
 
         return pd.DataFrame(features)
 
