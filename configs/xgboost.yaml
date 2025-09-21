@@ -1,11 +1,13 @@
-# Configuration for XGBoost model
+# Robust Configuration for XGBoost model with regularization
 transcript_source: seeking_alpha
 price_source: yfinance
 transcript_dir: "./transcript_data"
 
-# Model settings
+# Model settings - tuned for robustness
 embedding_model: thenlper/gte-small
 alpha_model: xgboost
+use_pca: true
+pca_n_components: 10 # Reduced from 50 to prevent overfitting
 
 # Trading parameters
 holding_periods: [5, 10, 20]
@@ -14,10 +16,15 @@ use_market_neutral: true
 benchmark_ticker: SPY
 
 # Training settings
-train_test_split_date: "2023-01-01"
+train_test_split_date: "2019-01-01"  # Will be auto-adjusted if needed
 random_seed: 42
 
+# Hyperparameter tuning - enabled with robust parameters
+use_hyperparam_tuning: true
+tuner_param_grid_path: "./configs/params.json"
+tuner_scoring_metric: accuracy
+
 # Output settings
-output_dir: ./outputs/xgboost
+output_dir: ./outputs/robust_xgboost
 cache_dir: ./cache
 log_level: INFO
