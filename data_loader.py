@@ -47,9 +47,10 @@ class DataLoader:
             else:
                 ticker_df = data['Close']
             ticker_df = pd.DataFrame(ticker_df).reset_index()
+            ticker_df = ticker_df.rename(columns={ticker_df.columns[1]: 'close'})
             ticker_df['ticker'] = ticker
             df_list.append(ticker_df)
-        df = pd.concat(df_list).rename(columns={'Date': 'timestamp', 'Close': 'close'})
+        df = pd.concat(df_list).rename(columns={'Date': 'timestamp'})
         df.to_parquet(cache_path)
         return df[['timestamp', 'ticker', 'close']]
 

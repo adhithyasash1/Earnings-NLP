@@ -2,6 +2,9 @@
 import argparse
 from pathlib import Path
 import sys
+import os
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from config import Config
 from pipeline import EarningsNLPPipeline
@@ -13,6 +16,7 @@ def main():
     args = parser.parse_args()
 
     config = Config.from_yaml(args.config)
+    config.setup_directories()
     print(f"Running with config: {config.alpha_model}, {config.embedding_model}")
 
     pipeline = EarningsNLPPipeline(config)

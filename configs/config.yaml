@@ -1,10 +1,10 @@
 transcript_source: seeking_alpha
 price_source: yfinance
 transcript_dir: "./transcript_data"
-embedding_model: nvidia/NV-Embed-v2
-alpha_model: xgboost
+embedding_model: all-MiniLM-L6-v2
+alpha_model: logistic
 use_pca: true
-pca_n_components: 10
+pca_n_components: 0.95
 holding_periods: [5]
 prediction_target: direction
 use_market_neutral: true
@@ -12,7 +12,7 @@ benchmark_ticker: SPY
 labeling_strategy: quantile
 train_test_split_date: "2023-01-01"
 random_seed: 42
-use_hyperparam_tuning: true
+use_hyperparam_tuning: false
 tuner_param_grid_path: "./configs/params.json"
 tuner_scoring_metric: accuracy
 output_dir: ./outputs

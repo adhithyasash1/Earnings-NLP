@@ -11,10 +11,10 @@ class Config(BaseSettings):
     transcript_source: str = "seeking_alpha"
     price_source: str = "yfinance"
     transcript_dir: str = "./transcript_data"
-    embedding_model: str = "all-MiniLM-L6-v2"  # Simpler baseline model
-    alpha_model: str = "logistic"  # Simpler baseline model
+    embedding_model: str = "all-MiniLM-L6-v2"
+    alpha_model: str = "logistic"
     use_pca: bool = True
-    pca_n_components: int = 10
+    pca_n_components: float = 0.95
     holding_periods: List[int] = [5]
     prediction_target: str = "direction"
     use_market_neutral: bool = True
