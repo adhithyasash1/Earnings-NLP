@@ -109,37 +109,77 @@ class AlphaModel:
 
             ticker_prices = prices_df[prices_df['ticker'] == ticker].sort_values('timestamp')
             entry_prices = ticker_prices[ticker_prices['timestamp'] >= entry_date]
-            if entry_prices.empty: continue
+            if entry_prices.empty:
+                continue
             entry_price = entry_prices.iloc[0]['close']
 
             exit_prices = ticker_prices[ticker_prices['timestamp'] <= exit_date]
-            if exit_prices.empty: continue
+            if exit_prices.empty:
+                continue
             exit_price = exit_prices.iloc[-1]['close']
 
-            if entry_price <= 0 or exit_price <= 0 or abs((exit_price - entry_price) / entry_price) > 0.5:
+            # Fix: Convert to scalar values and add proper validation
+            try:
+                entry_price_val = float(entry_price)
+                exit_price_val = float(exit_price)
+            except (ValueError, TypeError):
                 continue
 
-            future_return = (exit_price - entry_price) / entry_price
+            # Skip if prices are invalid or the return is too extreme (likely data error)
+            if (entry_price_val <= 0 or exit_price_val <= 0 or
+                abs((exit_price_val - entry_price_val) / entry_price_val) > 0.5):
+                continue
+
+            future_return = (exit_price_val - entry_price_val) / entry_price_val
             result_row = row.to_dict()
             result_row['future_return'] = future_return
             results.append(result_row)
 
         merged = pd.DataFrame(results)
 
+        if merged.empty:
+            self.logger.warning("No valid price data found for any features")
+            return pd.DataFrame()
+
         if self.config.use_market_neutral and benchmark_df is not None:
             benchmark_df = benchmark_df.sort_values('timestamp')
+            valid_indices = []
+
             for idx, row in merged.iterrows():
                 entry_date = row['entry_date']
                 exit_date = row['exit_date']
-                bench_entry = benchmark_df[benchmark_df['timestamp'] >= entry_date].iloc[0]['close'] if not benchmark_df[benchmark_df['timestamp'] >= entry_date].empty else None
-                bench_exit = benchmark_df[benchmark_df['timestamp'] <= exit_date].iloc[-1]['close'] if not benchmark_df[benchmark_df['timestamp'] <= exit_date].empty else None
-                if bench_entry is None or bench_exit is None or bench_entry <= 0 or bench_exit <= 0:
+
+                bench_entry_data = benchmark_df[benchmark_df['timestamp'] >= entry_date]
+                bench_exit_data = benchmark_df[benchmark_df['timestamp'] <= exit_date]
+
+                if bench_entry_data.empty or bench_exit_data.empty:
                     continue
-                benchmark_return = (bench_exit - bench_entry) / bench_entry
+
+                bench_entry = bench_entry_data.iloc[0]['close']
+                bench_exit = bench_exit_data.iloc[-1]['close']
+
+                try:
+                    bench_entry_val = float(bench_entry)
+                    bench_exit_val = float(bench_exit)
+                except (ValueError, TypeError):
+                    continue
+
+                if bench_entry_val <= 0 or bench_exit_val <= 0:
+                    continue
+
+                benchmark_return = (bench_exit_val - bench_entry_val) / bench_entry_val
                 merged.at[idx, 'relative_return'] = row['future_return'] - benchmark_return
+                valid_indices.append(idx)
+
+            # Keep only rows with valid benchmark data
+            merged = merged.loc[valid_indices]
             return_col = 'relative_return'
         else:
             return_col = 'future_return'
+
+        if merged.empty:
+            self.logger.warning("No valid data after benchmark adjustment")
+            return pd.DataFrame()
 
         if self.config.prediction_target == "direction":
             merged = self._create_labels(merged, return_col)

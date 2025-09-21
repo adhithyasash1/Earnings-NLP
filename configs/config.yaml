@@ -17,4 +17,4 @@ tuner_param_grid_path: "./configs/params.json"
 tuner_scoring_metric: accuracy
 output_dir: ./outputs
 cache_dir: ./cache
-log_level: INFO
+log_level: DEBUG
