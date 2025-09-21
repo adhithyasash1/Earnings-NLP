@@ -71,7 +71,7 @@ class AlphaModel:
         if emb_cols and self.config.use_pca:
             emb_pipeline = Pipeline([
                 ('scaler', StandardScaler()),
-                ('pca', PCA(n_components=min(10, len(emb_cols)), random_state=self.config.random_seed))
+                ('pca', PCA(n_components=self.config.pca_n_components, random_state=self.config.random_seed))
             ])
             transformers.append(('embeddings', emb_pipeline, emb_cols))
 
@@ -131,8 +131,10 @@ class AlphaModel:
             for idx, row in merged.iterrows():
                 entry_date = row['entry_date']
                 exit_date = row['exit_date']
-                bench_entry = benchmark_df[benchmark_df['timestamp'] >= entry_date].iloc[0]['close']
-                bench_exit = benchmark_df[benchmark_df['timestamp'] <= exit_date].iloc[-1]['close']
+                bench_entry = benchmark_df[benchmark_df['timestamp'] >= entry_date].iloc[0]['close'] if not benchmark_df[benchmark_df['timestamp'] >= entry_date].empty else None
+                bench_exit = benchmark_df[benchmark_df['timestamp'] <= exit_date].iloc[-1]['close'] if not benchmark_df[benchmark_df['timestamp'] <= exit_date].empty else None
+                if bench_entry is None or bench_exit is None or bench_entry <= 0 or bench_exit <= 0:
+                    continue
                 benchmark_return = (bench_exit - bench_entry) / bench_entry
                 merged.at[idx, 'relative_return'] = row['future_return'] - benchmark_return
             return_col = 'relative_return'

@@ -1,7 +1,7 @@
 """Data loading"""
 import glob
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 from pathlib import Path
 import yfinance as yf
@@ -42,7 +42,10 @@ class DataLoader:
         data = yf.download(" ".join(tickers), start=start, end=end + timedelta(days=1), auto_adjust=True)
         df_list = []
         for ticker in tickers:
-            ticker_df = data['Close'].xs(ticker, level=1, axis=1) if len(tickers) > 1 else data['Close']
+            if len(tickers) > 1:
+                ticker_df = data[('Close', ticker)]
+            else:
+                ticker_df = data['Close']
             ticker_df = pd.DataFrame(ticker_df).reset_index()
             ticker_df['ticker'] = ticker
             df_list.append(ticker_df)

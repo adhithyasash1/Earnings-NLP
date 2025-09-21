@@ -14,7 +14,7 @@ class FeatureExtractor:
     def __init__(self, config: Config):
         self.config = config
         self.logger = setup_logging(config.log_level)
-        self.embedding_model = SentenceTransformer(config.embedding_model)
+        self.embedding_model = SentenceTransformer(config.embedding_model, device='cpu')
         self.sentiment_model = pipeline("sentiment-analysis", model="ProsusAI/finbert")
 
     def extract_features(self, transcripts: List[Transcript]) -> pd.DataFrame:

@@ -34,10 +34,10 @@ class Backtester:
         if is_classification:
             strategy_returns = returns * (2 * labels - 1) - transaction_cost
         else:
-            signal = np.clip(predictions / np.abs(predictions).max(), -1, 1)
+            signal = np.clip(predictions / np.abs(predictions).max(), -1, 1) if predictions.any() else np.zeros_like(returns)
             strategy_returns = returns * signal - transaction_cost
 
-        strategy_returns = np.clip(strategy_returns, -0.5, 0.5)  # Cap extreme
+        strategy_returns = np.clip(strategy_returns, -0.5, 0.5)
 
         metrics['total_return'] = strategy_returns.sum()
         metrics['mean_return'] = strategy_returns.mean()
