@@ -1,5 +1,6 @@
 """Configuration"""
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from typing import List, Dict
 import yaml
 import json
@@ -27,8 +28,10 @@ class Config(BaseSettings):
     cache_dir: str = "./cache"
     log_level: str = "INFO"
 
-    class Config:
-        env_file = '.env'
+    model_config = ConfigDict(
+        extra='ignore',
+        env_file='.env'
+    )
 
     @classmethod
     def from_yaml(cls, path: str):
