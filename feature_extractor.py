@@ -173,12 +173,13 @@ class FeatureExtractor:
                     feature_dict[f'topic_{i}'] = 0.0
 
         # Second pass for deltas (now with topics)
+        prev_by_ticker = {}  # Reset to track complete features with topics
         for t, feature_dict in zip(transcripts, features):
-            prev = prev_by_ticker.get(t.ticker)
-            if prev:
+            if t.ticker in prev_by_ticker:
+                prev = prev_by_ticker[t.ticker]
                 for key in ['sentiment_finbert', 'sentiment_vader', 'lm_positive', 'lm_negative', 'lm_uncertainty',
                             'word_count'] + [f'topic_{i}' for i in range(5)]:
-                    if key in feature_dict:  # Ensure key exists
+                    if key in feature_dict and key in prev:  # Ensure key exists in both
                         feature_dict[f'{key}_delta'] = feature_dict[key] - prev[key]
             prev_by_ticker[t.ticker] = feature_dict.copy()
 
