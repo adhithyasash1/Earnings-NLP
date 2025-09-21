@@ -1,5 +1,5 @@
 # ============================================
-# backtester.py - Enhanced Performance Evaluation
+# backtester.py - Fixed Plotting Issues
 # ============================================
 """Comprehensive backtesting with portfolio metrics"""
 from scipy.stats import spearmanr
@@ -17,6 +17,7 @@ from typing import Dict
 # Import your Config and setup_logging
 from config import Config
 from utils import setup_logging
+
 
 class Backtester:
     def __init__(self, config: Config):
@@ -48,6 +49,11 @@ class Backtester:
             metrics['f1'] = f1_score(actuals, labels, zero_division=0)
             # Store for plotting
             self.cm = confusion_matrix(actuals, labels)
+
+            # Check if we have both classes in the data
+            unique_actual = np.unique(actuals)
+            unique_pred = np.unique(labels)
+            self.has_both_classes = len(unique_actual) > 1 or len(unique_pred) > 1
 
         # Trading metrics
         if returns is not None:
@@ -120,17 +126,36 @@ class Backtester:
         return report
 
     def _plot_confusion_matrix(self, save_path: str):
-        """Plots the confusion matrix."""
-        if not hasattr(self, 'cm'):
+        """Plots the confusion matrix with error handling for single-class predictions."""
+        if not hasattr(self, 'cm') or not hasattr(self, 'has_both_classes'):
             return
 
-        fig, ax = plt.subplots(figsize=(6, 6))
-        disp = ConfusionMatrixDisplay(self.cm, display_labels=[0, 1])
-        disp.plot(ax=ax, cmap=plt.cm.Blues)
-        ax.set_title('Confusion Matrix (Test Set)')
-        plt.tight_layout()
-        plt.savefig(save_path)
-        plt.close()
+        try:
+            fig, ax = plt.subplots(figsize=(6, 6))
+
+            # Handle single class case
+            if not self.has_both_classes:
+                # If we only have one class, create a simple text plot instead
+                ax.text(0.5, 0.5, f'Single Class Prediction\nAll predictions: {self.cm.flatten()[0]} samples',
+                        ha='center', va='center', transform=ax.transAxes, fontsize=14)
+                ax.set_title('Confusion Matrix (Single Class)', fontsize=16)
+                ax.set_xlim(0, 1)
+                ax.set_ylim(0, 1)
+                ax.set_xticks([])
+                ax.set_yticks([])
+            else:
+                # Normal confusion matrix for multi-class case
+                disp = ConfusionMatrixDisplay(self.cm, display_labels=[0, 1])
+                disp.plot(ax=ax, cmap=plt.cm.Blues)
+                ax.set_title('Confusion Matrix (Test Set)')
+
+            plt.tight_layout()
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            plt.close()
+
+        except Exception as e:
+            self.logger.warning(f"Could not create confusion matrix plot: {e}")
+            plt.close()
 
     def plot_results(self, save_dir: str = None):
         """Generate and save performance plots"""
@@ -139,25 +164,31 @@ class Backtester:
         Path(save_dir).mkdir(exist_ok=True)
 
         if hasattr(self, 'strategy_returns') and not self.strategy_returns.empty:
-            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+            try:
+                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
-            cumulative = (1 + self.strategy_returns).cumprod()
-            ax1.plot(cumulative.index, cumulative.values)
-            ax1.set_title('Cumulative Strategy Returns (Event-Based)')
-            ax1.set_ylabel('Cumulative Return')
-            ax1.grid(True)
+                cumulative = (1 + self.strategy_returns).cumprod()
+                ax1.plot(cumulative.index, cumulative.values, linewidth=2)
+                ax1.set_title('Cumulative Strategy Returns (Event-Based)', fontsize=14)
+                ax1.set_ylabel('Cumulative Return')
+                ax1.grid(True, alpha=0.3)
+                ax1.axhline(y=1, color='red', linestyle='--', alpha=0.5)
 
-            running_max = cumulative.cummax()
-            drawdown = (cumulative - running_max) / running_max
-            ax2.fill_between(drawdown.index, drawdown.values, 0, alpha=0.3, color='red')
-            ax2.set_title('Drawdown')
-            ax2.set_ylabel('Drawdown %')
-            ax2.set_xlabel('Trade Number')
-            ax2.grid(True)
+                running_max = cumulative.cummax()
+                drawdown = (cumulative - running_max) / running_max
+                ax2.fill_between(drawdown.index, drawdown.values, 0, alpha=0.3, color='red')
+                ax2.set_title('Drawdown', fontsize=14)
+                ax2.set_ylabel('Drawdown %')
+                ax2.set_xlabel('Trade Number')
+                ax2.grid(True, alpha=0.3)
 
-            plt.tight_layout()
-            plt.savefig(Path(save_dir) / 'performance.png')
-            plt.close()
+                plt.tight_layout()
+                plt.savefig(Path(save_dir) / 'performance.png', dpi=150, bbox_inches='tight')
+                plt.close()
+
+            except Exception as e:
+                self.logger.warning(f"Could not create performance plots: {e}")
+                plt.close()
 
         # Plot confusion matrix if it's a classification task
         if self.config.prediction_target == "direction":

@@ -1,5 +1,5 @@
 # ============================================
-# pipeline.py - Updated Pipeline
+# pipeline.py - Fixed Pipeline with Dynamic Split
 # ============================================
 """End-to-end pipeline with proper out-of-sample testing"""
 import logging
@@ -39,13 +39,32 @@ class EarningsNLPPipeline:
         self.alpha_model = AlphaModel(config)
         self.backtester = Backtester(config)
 
+    def _determine_split_date(self, features_df: pd.DataFrame) -> str:
+        """
+        Automatically determine a good train/test split date based on the data.
+        Uses 80% of data for training, 20% for testing.
+        """
+        dates = pd.to_datetime(features_df['date']).sort_values()
+        min_date = dates.min()
+        max_date = dates.max()
+
+        self.logger.info(f"Data date range: {min_date.date()} to {max_date.date()}")
+
+        # Use 80% of the time range for training
+        total_days = (max_date - min_date).days
+        train_days = int(total_days * 0.8)
+        calculated_split_date = min_date + pd.Timedelta(days=train_days)
+
+        self.logger.info(f"Calculated split date: {calculated_split_date.date()}")
+
+        return calculated_split_date.strftime('%Y-%m-%d')
+
     def run(self):
         """Execute complete pipeline with proper train/test split"""
         self.logger.info("Starting Earnings NLP Pipeline...")
         self.logger.info(f"Prediction Target: {self.config.prediction_target}")
         self.logger.info(f"Model: {self.config.alpha_model}")
 
-        # ... (Steps 1-7 are unchanged) ...
         # 1. Load transcripts
         self.logger.info("Loading transcripts...")
         transcripts = self.data_loader.load_transcripts()
@@ -76,17 +95,33 @@ class EarningsNLPPipeline:
             holding_period=self.config.holding_periods[0]
         )
 
-        # 7. CRITICAL: Train/Test Split
-        split_date = pd.to_datetime(self.config.train_test_split_date)
+        # 7. CRITICAL: Determine appropriate split date
+        if pd.to_datetime(self.config.train_test_split_date) >= pd.to_datetime(labeled_data['date']).max():
+            self.logger.warning(f"Configured split date {self.config.train_test_split_date} is after all data!")
+            self.logger.info("Automatically determining split date...")
+            split_date_str = self._determine_split_date(labeled_data)
+            split_date = pd.to_datetime(split_date_str)
+        else:
+            split_date = pd.to_datetime(self.config.train_test_split_date)
+            split_date_str = self.config.train_test_split_date
+
+        # 8. Train/Test Split
         labeled_data = labeled_data.sort_values('date')
         train_df = labeled_data[labeled_data['date'] < split_date]
         test_df = labeled_data[labeled_data['date'] >= split_date]
-        self.logger.info(f"Train samples: {len(train_df)}, Test samples: {len(test_df)}")
-        if len(test_df) == 0:
-            self.logger.error("No test samples! Adjust split_date in config.")
-            return {}
 
-        # 8. Train model (on training data only)
+        self.logger.info(f"Using split date: {split_date_str}")
+        self.logger.info(f"Train samples: {len(train_df)}, Test samples: {len(test_df)}")
+
+        if len(test_df) == 0:
+            self.logger.error("Still no test samples after automatic split adjustment!")
+            # Fallback: use last 20% of samples regardless of date
+            n_test = max(1, len(labeled_data) // 5)  # At least 1 test sample, or 20%
+            train_df = labeled_data.iloc[:-n_test]
+            test_df = labeled_data.iloc[-n_test:]
+            self.logger.info(f"Using sample-based split: Train {len(train_df)}, Test {len(test_df)}")
+
+        # 9. Train model (on training data only)
         emb_cols = [c for c in train_df.columns if c.startswith('emb_')]
         linguistic_cols = [
             'sentiment', 'sentiment_remarks', 'sentiment_qa',
@@ -106,14 +141,14 @@ class EarningsNLPPipeline:
         val_score = self.alpha_model.train(X_train, y_train)
         self.logger.info(f"Training validation score: {val_score:.3f}")
 
-        # 9. Out-of-sample evaluation
+        # 10. Out-of-sample evaluation
         self.logger.info("Evaluating on out-of-sample test set...")
         X_test = test_df[feature_cols].fillna(0)
         y_test = test_df['label']
 
         predictions, pred_labels = self.alpha_model.predict(X_test)
 
-        # 10. Calculate metrics
+        # 11. Calculate metrics
         metrics = self.backtester.evaluate(
             predictions,
             pred_labels,
@@ -122,18 +157,18 @@ class EarningsNLPPipeline:
             test_df['date']
         )
 
-        # 11. Generate and save report
+        # 12. Generate and save report
         report_path = Path(self.config.output_dir) / "backtest_report.txt"
         report = self.backtester.generate_report(metrics, report_path)
         self.logger.info("\n" + report)
 
-        # 12. Generate plots
+        # 13. Generate plots
         self.backtester.plot_results()
 
-        # --- NEW: Save full results ---
+        # 14. Save full results
         self.backtester.save_full_results()
 
-        # 13. Save model
+        # 15. Save model
         self.alpha_model.save()
 
         return metrics
